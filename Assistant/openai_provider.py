@@ -2,10 +2,26 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
 from typing import Any, Generator, Literal, Optional
 
 import httpx
+
+
+class ProviderError(Exception):
+    """Provider 相关基础异常"""
+    pass
+
+
+class TimeoutException(ProviderError):
+    """请求超时异常"""
+    pass
+
+
+class APIError(ProviderError):
+    """API 返回错误"""
+    pass
 
 
 @dataclass
@@ -46,10 +62,14 @@ class OpenAIProvider:
         api_key: Optional[str] = None,
         base_url: str = "https://api.openai.com/v1",
         timeout: float = 60.0,
+        max_retries: int = 10,
+        retry_delay: float = 1.0,
     ):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
         self._client: Optional[httpx.Client] = None
 
     @property
@@ -96,12 +116,20 @@ class OpenAIProvider:
 
         url = f"{self.base_url}/chat/completions"
 
-        if stream:
-            return self._stream_request(url, payload)
-        response = self.client.post(url, json=payload)
-        response.raise_for_status()
-        data = response.json()
-        return ChatCompletion.from_response(model, data)
+        for attempt in range(self.max_retries):
+            try:
+                if stream:
+                    return self._stream_request(url, payload)
+                response = self.client.post(url, json=payload)
+                response.raise_for_status()
+                data = response.json()
+                return ChatCompletion.from_response(model, data)
+            except httpx.TimeoutException as e:
+                if attempt == self.max_retries - 1:
+                    raise TimeoutException(f"请求超时（已重试{self.max_retries}次）: {e}")
+                time.sleep(self.retry_delay * (2 ** attempt))
+            except httpx.HTTPStatusError as e:
+                raise APIError(f"API 错误: {e.response.status_code} - {e}")
 
     def _stream_request(
         self, url: str, payload: dict[str, Any]
