@@ -1,8 +1,3 @@
-# 这是一个示例 Python 脚本。
-
-# 按 ⌃R 执行或将其替换为您的代码。
-# 按 双击 ⇧ 在所有地方搜索类、文件、工具窗口、操作和设置。
-
 import asyncio
 from dataclasses import dataclass
 from collections import OrderedDict
@@ -34,15 +29,12 @@ def loop(provider: OpenAIProvider, model: str):
             print("Assistant: ", end="", flush=True)
             response = ""
             for chunk in agent.send_message(user_input):
-            #for chunk in provider.chat_completions(model=model, messages=context.messages, stream=True):
                 print(chunk, end="", flush=True)
                 response += chunk
-            print()  # 换行
+            print()
 
-            #context.messages.append(Message(role="assistant", content=response))
-            context.truncate_messages(provider=provider, model=model, prompt=compress_prompt)
         except KeyboardInterrupt:
-            print("\n再见!")
+            print("\nGoodbye!")
             break
 
 def main():
@@ -54,8 +46,6 @@ def main():
 
     loop(provider, "qwen/qwen3.6-27b")
 
-# 按装订区域中的绿色按钮以运行脚本。
 if __name__ == '__main__':
     main()
 
-# 访问 https://www.jetbrains.com/help/pycharm/ 获取 PyCharm 帮助
