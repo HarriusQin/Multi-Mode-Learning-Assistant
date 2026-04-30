@@ -12,7 +12,10 @@ from Assistant.context import Context, LRUCache
 from Assistant.openai_provider import OpenAIProvider
 from Assistant.agent import AgentLoopRunner
 from Assistant.tools.base import BaseTool
+from Assistant.tools import CalculatorTool, HelloTool, KBSearchTool
 from Assistant.logging_config import init_logging, get_logger
+from Assistant.sqlite_rag import VectorDB_kb
+from Assistant.openai_embedding_provider import OpenAIEmbeddingProvider
 
 # 初始化日志系统
 init_logging(level=10)  # DEBUG level
@@ -21,56 +24,6 @@ logger = get_logger("main")
 logger.info("=" * 50)
 logger.info("应用启动")
 logger.info("=" * 50)
-
-class HelloTool(BaseTool):
-    name = "hello_tool"
-    description = "一个简单的工具，返回问候语"
-    parameters = [
-        {"name": "name", "type": "string", "description": "你的名字"}
-    ]
-
-    def execute(self, name: str) -> str:
-        return f"Hello, {name}! 这是一个测试工具。"
-
-class CalculatorTool(BaseTool):
-    name = "calculator"
-    description = "一个简单的计算器，可以进行数学运算。表达式应使用 Python 语法，指数用 ** 表示（如 2**10 表示 2 的 10 次方）"
-    parameters = [
-        {"name": "expression", "type": "string", "description": "数学表达式，使用 Python 语法，如 2+3*4, 2**10"}
-    ]
-
-    def execute(self, expression: str) -> str:
-        try:
-            # 将 ^ 转换为 ** (Python 中 ^ 是 XOR)
-            import re
-            # 替换不跟在 ** 后面的 ^ 为 **
-            expr = re.sub(r'(?<!\*)\^(?!\*)', '**', expression)
-            result = eval(expr, {"__builtins__": {}}, {})
-            return str(result)
-        except Exception as e:
-            return f"计算错误: {e}"
-
-
-class KBSearchTool(BaseTool):
-    name = "kb_search"
-    description = "从知识库中搜索相关信息。适用于回答需要事实依据的问题。"
-    parameters = [
-        {"name": "query", "type": "string", "description": "搜索查询"},
-        {"name": "top_k", "type": "integer", "description": "返回数量", "required": False, "default": 3}
-    ]
-
-    def __init__(self, kb):
-        self.kb = kb
-
-    def execute(self, query: str, top_k: int = 3) -> str:
-        results = self.kb.search(query, top_k=top_k, use_rerank=False)
-        if not results:
-            return "知识库中未找到相关信息"
-        formatted = "\n".join(
-            f"[{i+1}] {r['content']} (score: {r['score']:.2f})"
-            for i, r in enumerate(results)
-        )
-        return formatted
 
 
 def loop(provider: OpenAIProvider, model: str, tools: list[BaseTool] = None):
@@ -169,6 +122,69 @@ def test_context_compression():
     logger.info("上下文压缩测试完成")
 
 
+def test_kb_search():
+    """测试知识库搜索工具"""
+    logger.info("开始测试 KB Search 工具")
+
+    # 创建 embedding provider
+    embed_provider = OpenAIEmbeddingProvider(
+        api_key="lm_studio",
+        base_url="http://100.76.92.62:1234/v1",
+        timeout=120.0,
+    )
+
+    # 创建 KB
+    kb = VectorDB_kb(
+        emb_model_provider=embed_provider,
+        emb_model_name="text-embedding-qwen3-embedding-8b",
+        db_path="test_kb.db",
+        n_dims=4096,
+    )
+
+    # 清空现有数据
+    kb.cursor.execute("DELETE FROM documents")
+    kb.conn.commit()
+
+    # 添加测试文档
+    docs = [
+        "Python 是一种广泛使用的编程语言。",
+        "JavaScript 主要用于网页开发。",
+        "机器学习是人工智能的一个分支。",
+        "深度学习是机器学习的一个子领域。",
+        "向量数据库用于存储和检索向量数据。",
+    ]
+    kb.add_documents(docs)
+    print(f"已添加 {len(docs)} 个文档到知识库")
+    print()
+
+    # 创建带 KB 搜索工具的 agent
+    provider = OpenAIProvider(
+        api_key="lm_studio",
+        base_url="http://100.126.144.112:1234/v1",
+        timeout=120.0,
+    )
+
+    kb_tool = KBSearchTool(kb)
+    agent = AgentLoopRunner(provider, "qwen/qwen3.6-27b", tools=[kb_tool])
+
+    print("=== KB Search 工具测试 ===")
+    print()
+
+    questions = [
+        "什么是 Python？",
+        "机器学习和深度学习有什么关系？",
+    ]
+
+    for q in questions:
+        print(f"You: {q}")
+        response = agent.send_message(q)
+        print(f"Assistant: {response}")
+        print()
+
+    kb.close()
+    logger.info("KB Search 测试完成")
+
+
 def main():
 
     provider = OpenAIProvider(
@@ -179,6 +195,6 @@ def main():
 
 
 if __name__ == "__main__":
-    test_context_compression()
+    test_kb_search()
 
     #main()
