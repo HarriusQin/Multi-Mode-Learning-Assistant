@@ -1,24 +1,18 @@
-import asyncio
-from dataclasses import dataclass
-from collections import OrderedDict
-from enum import Enum
-from typing import Optional
-from Assistant.openai_provider import OpenAIProvider, Message
+from dotenv import load_dotenv
 
-compress_prompt = """请将以下对话内容进行压缩，保留关键信息，删除冗余部分，使得压缩后的内容更简洁但仍能表达原意。请尽量保留对话中的重要细节和上下文信息。"""
+load_dotenv()
 
-from Assistant.defs import Config, Role, TruncationStrategy, AgentState
-from Assistant.context import Context, LRUCache
 from Assistant.openai_provider import OpenAIProvider
 from Assistant.agent import AgentLoopRunner
 from Assistant.tools.base import BaseTool
-from Assistant.tools import CalculatorTool, HelloTool, KBSearchTool
+from Assistant.tools import CalculatorTool, KBSearchTool
 from Assistant.logging_config import init_logging, get_logger
 from Assistant.sqlite_rag import VectorDB_kb
 from Assistant.openai_embedding_provider import OpenAIEmbeddingProvider
+from Assistant.vllm_reranker_provider import VLLMRerankerProvider
+from Assistant import config
 
-# 初始化日志系统
-init_logging(level=10)  # DEBUG level
+init_logging(level=config.LOG_LEVEL)
 logger = get_logger("main")
 
 logger.info("=" * 50)
@@ -26,9 +20,44 @@ logger.info("应用启动")
 logger.info("=" * 50)
 
 
-def loop(provider: OpenAIProvider, model: str, tools: list[BaseTool] = None):
-    context = Context()
-    agent = AgentLoopRunner(provider, model, tools=tools)
+def create_provider() -> OpenAIProvider:
+    return OpenAIProvider(
+        api_key=config.LLM_API_KEY,
+        base_url=config.LLM_BASE_URL,
+        timeout=config.LLM_TIMEOUT,
+    )
+
+
+def create_embed_provider() -> OpenAIEmbeddingProvider:
+    return OpenAIEmbeddingProvider(
+        api_key=config.EMBED_API_KEY,
+        base_url=config.EMBED_BASE_URL,
+        timeout=config.EMBED_TIMEOUT,
+    )
+
+
+def create_rerank_provider() -> VLLMRerankerProvider:
+    return VLLMRerankerProvider(
+        api_key=config.RERANK_API_KEY,
+        base_url=config.RERANK_BASE_URL,
+        timeout=config.RERANK_TIMEOUT,
+    )
+
+
+def create_vector_db() -> VectorDB_kb:
+    return VectorDB_kb(
+        emb_model_provider=create_embed_provider(),
+        emb_model_name=config.EMBED_MODEL,
+        rerank_model_provider=create_rerank_provider(),
+        rerank_model_name=config.RERANK_MODEL,
+        db_path=config.VECTOR_DB_PATH,
+        n_dims=config.EMBED_N_DIMS,
+    )
+
+
+def loop(tools: list[BaseTool] = None):
+    provider = create_provider()
+    agent = AgentLoopRunner(provider, config.LLM_MODEL, tools=tools)
     while True:
         try:
             user_input = input("You: ").strip()
@@ -49,18 +78,11 @@ def loop(provider: OpenAIProvider, model: str, tools: list[BaseTool] = None):
 
 
 def test_tool_loop():
-    """测试 Tool Execution Loop"""
     logger.info("开始测试 Tool Execution Loop")
 
-    provider = OpenAIProvider(
-        api_key="lm_studio",
-        base_url="http://100.126.144.112:1234/v1",
-        timeout=120.0,
-    )
-
+    provider = create_provider()
     tools = [CalculatorTool()]
-
-    agent = AgentLoopRunner(provider, "qwen/qwen3.6-27b", tools=tools)
+    agent = AgentLoopRunner(provider, config.LLM_MODEL, tools=tools)
 
     print("=== Tool Execution Loop 测试 ===")
     print("工具: calculator")
@@ -83,24 +105,16 @@ def test_tool_loop():
 
 
 def test_context_compression():
-    """测试上下文压缩"""
     logger.info("开始测试上下文压缩")
 
-    provider = OpenAIProvider(
-        api_key="lm_studio",
-        base_url="http://100.126.144.112:1234/v1",
-        timeout=120.0,
-    )
-
+    provider = create_provider()
     tools = [CalculatorTool()]
-    agent = AgentLoopRunner(provider, "qwen/qwen3.6-27b", tools=tools)
+    agent = AgentLoopRunner(provider, config.LLM_MODEL, tools=tools)
 
     print("=== 上下文压缩测试 ===")
     print(f"max_messages: {agent.context.max_messages}")
     print()
 
-    # 发送超过 max_messages 的对话
-    # 每个问题产生约 3 条消息 (user + assistant + tool)，超过 20 条时触发压缩
     questions = [
         "计算 10 + 20",
         "计算 30 - 15",
@@ -123,29 +137,13 @@ def test_context_compression():
 
 
 def test_kb_search():
-    """测试知识库搜索工具"""
     logger.info("开始测试 KB Search 工具")
 
-    # 创建 embedding provider
-    embed_provider = OpenAIEmbeddingProvider(
-        api_key="lm_studio",
-        base_url="http://100.76.92.62:1234/v1",
-        timeout=120.0,
-    )
+    kb = create_vector_db()
 
-    # 创建 KB
-    kb = VectorDB_kb(
-        emb_model_provider=embed_provider,
-        emb_model_name="text-embedding-qwen3-embedding-8b",
-        db_path="test_kb.db",
-        n_dims=4096,
-    )
-
-    # 清空现有数据
     kb.cursor.execute("DELETE FROM documents")
     kb.conn.commit()
 
-    # 添加测试文档
     docs = [
         "Python 是一种广泛使用的编程语言。",
         "JavaScript 主要用于网页开发。",
@@ -157,15 +155,9 @@ def test_kb_search():
     print(f"已添加 {len(docs)} 个文档到知识库")
     print()
 
-    # 创建带 KB 搜索工具的 agent
-    provider = OpenAIProvider(
-        api_key="lm_studio",
-        base_url="http://100.126.144.112:1234/v1",
-        timeout=120.0,
-    )
-
+    provider = create_provider()
     kb_tool = KBSearchTool(kb)
-    agent = AgentLoopRunner(provider, "qwen/qwen3.6-27b", tools=[kb_tool])
+    agent = AgentLoopRunner(provider, config.LLM_MODEL, tools=[kb_tool])
 
     print("=== KB Search 工具测试 ===")
     print()
@@ -186,12 +178,7 @@ def test_kb_search():
 
 
 def main():
-
-    provider = OpenAIProvider(
-        api_key="lm_studio", base_url="http://100.126.144.112:1234/v1"
-    )
-
-    loop(provider, "qwen/qwen3.6-27b")
+    loop(tools=[CalculatorTool()])
 
 
 if __name__ == "__main__":

@@ -22,3 +22,8 @@ uv.lock
 
 test_kb.db
 logs/
+
+# Environment variables
+.env
+.env.local
+knowledge.db
