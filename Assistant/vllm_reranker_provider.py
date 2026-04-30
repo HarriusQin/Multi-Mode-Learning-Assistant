@@ -7,6 +7,10 @@ from typing import Any, Optional
 
 import httpx
 
+from .logging_config import get_logger
+
+logger = get_logger("reranker")
+
 
 class RerankerError(Exception):
     """Reranker 相关基础异常"""
@@ -124,16 +128,21 @@ class VLLMRerankerProvider:
 
         for attempt in range(self.max_retries):
             try:
+                logger.debug(f"[{model}] 请求 rerank, 文档数: {len(documents)}, attempt {attempt + 1}/{self.max_retries}")
                 response = self.client.post(url, json=payload)
                 response.raise_for_status()
-                return RerankResponse.from_dict(response.json())
+                result = RerankResponse.from_dict(response.json())
+                logger.info(f"[{model}] 成功, 返回 {len(result.results)} 个结果")
+                return result
             except httpx.TimeoutException as e:
+                logger.warning(f"[{model}] 请求超时, attempt {attempt + 1}/{self.max_retries}: {e}")
                 if attempt == self.max_retries - 1:
                     raise RerankerTimeoutException(
                         f"请求超时（已重试{self.max_retries}次）: {e}"
                     )
                 time.sleep(self.retry_delay * (2 ** attempt))
             except httpx.HTTPStatusError as e:
+                logger.error(f"[{model}] HTTP错误 {e.response.status_code}: {e.response.text[:200]}")
                 raise RerankerAPIError(f"API 错误: {e.response.status_code} - {e}")
 
     def rerank_with_scores(

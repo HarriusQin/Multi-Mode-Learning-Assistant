@@ -9,6 +9,9 @@ from typing import Any, Generator, Literal, Optional
 import httpx
 
 from .defs import ToolCall
+from .logging_config import get_logger
+
+logger = get_logger("provider")
 
 
 class ProviderError(Exception):
@@ -161,15 +164,19 @@ class OpenAIProvider:
 
         for attempt in range(self.max_retries):
             try:
+                logger.debug(f"[{model}] 请求 {url}, attempt {attempt + 1}/{self.max_retries}")
                 response = self.client.post(url, json=payload)
                 response.raise_for_status()
                 data = response.json()
+                logger.info(f"[{model}] 成功, usage: {data.get('usage', {})}")
                 return ChatCompletion.from_response(model, data)
             except httpx.TimeoutException as e:
+                logger.warning(f"[{model}] 请求超时, attempt {attempt + 1}/{self.max_retries}: {e}")
                 if attempt == self.max_retries - 1:
                     raise TimeoutException(f"请求超时（已重试{self.max_retries}次）: {e}")
                 time.sleep(self.retry_delay * (2 ** attempt))
             except httpx.HTTPStatusError as e:
+                logger.error(f"[{model}] HTTP错误 {e.response.status_code}: {e.response.text[:200]}")
                 raise APIError(f"API 错误: {e.response.status_code} - {e}")
 
     def _stream_request(

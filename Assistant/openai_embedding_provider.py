@@ -7,6 +7,10 @@ from typing import Any, Optional
 
 import httpx
 
+from .logging_config import get_logger
+
+logger = get_logger("embedding")
+
 
 class EmbeddingError(Exception):
     """Embedding 相关基础异常"""
@@ -120,16 +124,21 @@ class OpenAIEmbeddingProvider:
 
         for attempt in range(self.max_retries):
             try:
+                logger.debug(f"[{model}] 请求 embedding, attempt {attempt + 1}/{self.max_retries}")
                 response = self.client.post(url, json=payload)
                 response.raise_for_status()
-                return EmbeddingResponse.from_response(response.json())
+                result = EmbeddingResponse.from_response(response.json())
+                logger.info(f"[{model}] 成功, 向量维度: {len(result.data[0].embedding) if result.data else 0}")
+                return result
             except httpx.TimeoutException as e:
+                logger.warning(f"[{model}] 请求超时, attempt {attempt + 1}/{self.max_retries}: {e}")
                 if attempt == self.max_retries - 1:
                     raise EmbeddingTimeoutException(
                         f"请求超时（已重试{self.max_retries}次）: {e}"
                     )
                 time.sleep(self.retry_delay * (2 ** attempt))
             except httpx.HTTPStatusError as e:
+                logger.error(f"[{model}] HTTP错误 {e.response.status_code}: {e.response.text[:200]}")
                 raise EmbeddingAPIError(f"API 错误: {e.response.status_code} - {e}")
 
     def embed_single(

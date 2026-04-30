@@ -21,3 +21,4 @@ build/
 uv.lock
 
 test_kb.db
+logs/

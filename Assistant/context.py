@@ -22,15 +22,30 @@ class LRUCache:
             self.cache.popitem(last=False)
 
 class Context:
-    messages: list[Message] = []
-    cache: LRUCache = LRUCache() # Cache for storing kb / web search results (not implemented yet)
+    system_prompt: str = ""  # 系统提示词，单独存储
+    messages: list[Message] = []  # 普通消息记录
+    cache: LRUCache  # Cache for storing kb / web search results (not implemented yet)
     max_messages: int = 20
     compressed_reserve: int = 5
     truncate_strategy: TruncationStrategy = TruncationStrategy.COMPRESS
 
+    def __init__(self):
+        self.messages = []
+        self.cache = LRUCache()
+        self.system_prompt = ""
 
     def add_message(self, role: Role, content: str, tool_call_id: str = None):
         self.messages.append(Message(role=role.value, content=content, tool_call_id=tool_call_id))
+
+    def set_system_prompt(self, prompt: str):
+        """设置系统提示词"""
+        self.system_prompt = prompt
+
+    def get_messages(self) -> list[Message]:
+        """获取消息列表，系统提示词作为首条消息返回"""
+        if self.system_prompt:
+            return [Message(role="system", content=self.system_prompt)] + self.messages
+        return self.messages
 
     def message_overflow(self) -> bool:
         return len(self.messages) > self.max_messages
@@ -46,12 +61,21 @@ class Context:
     def compress_messages(self, provider: OpenAIProvider, model: str, prompt: str) -> None:
         if len(self.messages) < self.compressed_reserve:
             return
-        
+
         msgs_to_compress = self.messages[:-self.compressed_reserve]
         msgs_recent = self.messages[-self.compressed_reserve:]
 
         conversation = "\n".join([f"{msg.role}: {msg.content}" for msg in msgs_to_compress])
-        full_prompt = f"{prompt}\n\n{conversation}\n\nCompressed Conversation:"
+        full_prompt = f"{prompt}\n\n{conversation}\n\n请压缩以上对话，保留关键信息。"
 
-        summarized = provider.chat_completions(model=model, messages=[Message(role="system", content=full_prompt)], stream=False)[0]
-        self.messages = [Message(role="system", content=summarized)] + msgs_recent
+        # 模型需要 user 消息作为输入
+        summarized = provider.chat_completions(
+            model=model,
+            messages=[
+                Message(role="system", content=full_prompt),
+                Message(role="user", content="请总结上述对话的关键内容。")
+            ],
+            stream=False
+        )
+        # summary 作为消息添加到列表最前面，系统提示词保持不变
+        self.messages = [Message(role="system", content=summarized.content)] + msgs_recent

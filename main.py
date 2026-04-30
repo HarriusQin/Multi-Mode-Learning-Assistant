@@ -12,6 +12,15 @@ from Assistant.context import Context, LRUCache
 from Assistant.openai_provider import OpenAIProvider
 from Assistant.agent import AgentLoopRunner
 from Assistant.tools.base import BaseTool
+from Assistant.logging_config import init_logging, get_logger
+
+# 初始化日志系统
+init_logging(level=10)  # DEBUG level
+logger = get_logger("main")
+
+logger.info("=" * 50)
+logger.info("应用启动")
+logger.info("=" * 50)
 
 class HelloTool(BaseTool):
     name = "hello_tool"
@@ -25,14 +34,18 @@ class HelloTool(BaseTool):
 
 class CalculatorTool(BaseTool):
     name = "calculator"
-    description = "一个简单的计算器，可以进行数学运算"
+    description = "一个简单的计算器，可以进行数学运算。表达式应使用 Python 语法，指数用 ** 表示（如 2**10 表示 2 的 10 次方）"
     parameters = [
-        {"name": "expression", "type": "string", "description": "数学表达式，如 2+3*4"}
+        {"name": "expression", "type": "string", "description": "数学表达式，使用 Python 语法，如 2+3*4, 2**10"}
     ]
 
     def execute(self, expression: str) -> str:
         try:
-            result = eval(expression, {"__builtins__": {}}, {})
+            # 将 ^ 转换为 ** (Python 中 ^ 是 XOR)
+            import re
+            # 替换不跟在 ** 后面的 ^ 为 **
+            expr = re.sub(r'(?<!\*)\^(?!\*)', '**', expression)
+            result = eval(expr, {"__builtins__": {}}, {})
             return str(result)
         except Exception as e:
             return f"计算错误: {e}"
@@ -84,6 +97,8 @@ def loop(provider: OpenAIProvider, model: str, tools: list[BaseTool] = None):
 
 def test_tool_loop():
     """测试 Tool Execution Loop"""
+    logger.info("开始测试 Tool Execution Loop")
+
     provider = OpenAIProvider(
         api_key="lm_studio",
         base_url="http://100.126.144.112:1234/v1",
@@ -104,10 +119,54 @@ def test_tool_loop():
     ]
 
     for q in questions:
+        logger.info(f"发送问题: {q}")
         print(f"You: {q}")
         response = agent.send_message(q)
         print(f"Assistant: {response}")
         print()
+        logger.info(f"收到回答: {response[:100]}...")
+
+    logger.info("测试完成")
+
+
+def test_context_compression():
+    """测试上下文压缩"""
+    logger.info("开始测试上下文压缩")
+
+    provider = OpenAIProvider(
+        api_key="lm_studio",
+        base_url="http://100.126.144.112:1234/v1",
+        timeout=120.0,
+    )
+
+    tools = [CalculatorTool()]
+    agent = AgentLoopRunner(provider, "qwen/qwen3.6-27b", tools=tools)
+
+    print("=== 上下文压缩测试 ===")
+    print(f"max_messages: {agent.context.max_messages}")
+    print()
+
+    # 发送超过 max_messages 的对话
+    # 每个问题产生约 3 条消息 (user + assistant + tool)，超过 20 条时触发压缩
+    questions = [
+        "计算 10 + 20",
+        "计算 30 - 15",
+        "计算 5 * 6",
+        "计算 100 / 4",
+        "计算 2 的 3 次方",
+        "计算 15 + 25",
+        "计算 50 - 20",
+        "计算 7 * 8",
+    ]
+
+    for q in questions:
+        print(f"You: {q}")
+        response = agent.send_message(q)
+        print(f"Assistant: {response}")
+        print(f"  [消息数: {len(agent.context.messages)}]")
+        print()
+
+    logger.info("上下文压缩测试完成")
 
 
 def main():
@@ -120,6 +179,6 @@ def main():
 
 
 if __name__ == "__main__":
-    test_tool_loop()
+    test_context_compression()
 
     #main()

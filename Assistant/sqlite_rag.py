@@ -1,11 +1,14 @@
 from .openai_embedding_provider import OpenAIEmbeddingProvider
 from .vllm_reranker_provider import VLLMRerankerProvider
+from .logging_config import get_logger
 
 import sqlite_vec
 import sqlite3
 import struct
 import os
 from typing import Optional
+
+logger = get_logger("kb")
 
 
 class VectorDB_kb:
@@ -54,6 +57,7 @@ class VectorDB_kb:
 
     def add_document(self, text: str) -> int:
         """添加单个文档，返回文档 ID"""
+        logger.debug(f"添加文档: {text[:50]}...")
         vector = self.embed_provider.embed_single(self.embed_model_name, text)
         vector_bytes = self._vector_to_bytes(vector)
         self.cursor.execute(
@@ -61,7 +65,9 @@ class VectorDB_kb:
             (text, vector_bytes)
         )
         self.conn.commit()
-        return self.cursor.lastrowid
+        doc_id = self.cursor.lastrowid
+        logger.info(f"文档添加成功, id={doc_id}")
+        return doc_id
 
     def add_documents(self, texts: list[str]) -> list[int]:
         """批量添加文档，返回文档 ID 列表"""
@@ -107,7 +113,10 @@ class VectorDB_kb:
         candidates = self.cursor.fetchall()
 
         if not candidates:
+            logger.warning(f"未找到相关文档: {query}")
             return []
+
+        logger.debug(f"ANN 检索到 {len(candidates)} 个候选文档")
 
         if use_rerank and self.rerank_provider and self.rerank_model_name:
             docs = [c[1] for c in candidates]
