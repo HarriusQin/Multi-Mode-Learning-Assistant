@@ -76,7 +76,7 @@ class OpenAIEmbeddingProvider:
         max_retries: int = 10,
         retry_delay: float = 1.0,
     ):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
+        self.api_key = api_key if api_key is not None else os.getenv("OPENAI_API_KEY", "")
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.max_retries = max_retries
@@ -85,16 +85,17 @@ class OpenAIEmbeddingProvider:
 
     @property
     def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    def _new_client(self) -> httpx.Client:
+        return httpx.Client(timeout=self.timeout, headers=self._headers, trust_env=False)
 
     @property
     def client(self) -> httpx.Client:
-        if self._client is None:
-            self._client = httpx.Client(timeout=self.timeout, headers=self._headers)
-        return self._client
+        return self._new_client()
 
     def embed(
         self,

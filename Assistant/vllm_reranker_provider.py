@@ -87,7 +87,7 @@ class VLLMRerankerProvider:
     @property
     def client(self) -> httpx.Client:
         if self._client is None:
-            self._client = httpx.Client(timeout=self.timeout, headers=self._headers)
+            self._client = httpx.Client(timeout=self.timeout, headers=self._headers, trust_env=False)
         return self._client
 
     def rerank(
@@ -156,11 +156,12 @@ class VLLMRerankerProvider:
             score_threshold: 只返回分数高于此阈值的结果
             **kwargs: 其他参数
         """
-        response = self.rerank(model, query, documents, **kwargs)
+        response = self.rerank(model, query, documents, return_documents=False, **kwargs)
 
         results = [
-            (r.text, r.relevance_score)
+            (documents[r.index] if r.index < len(documents) else "", r.relevance_score)
             for r in sorted(response.results, key=lambda x: x.relevance_score, reverse=True)
+            if r.index < len(documents)
         ]
 
         if top_k is not None:
