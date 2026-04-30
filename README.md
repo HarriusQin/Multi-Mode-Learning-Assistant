@@ -102,6 +102,7 @@ print(response)
 - [知识库 RAG](docs/sqlite_rag.md) - 向量数据库和检索
 - [Provider 封装](docs/providers.md) - API 封装说明
 - [日志系统](docs/logging.md) - 日志配置和使用
+- [API Reference](docs/api.md) - 完整 API 参考文档
 
 ## License
 
