@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from collections import OrderedDict
 from .openai_provider import OpenAIProvider, Message
-from .defs import Config, Role, TruncationStrategy, AgentState
+from .defs import Config, Role, TruncationStrategy, AgentState, ToolCall, ToolResult
 
 class LRUCache:
     def __init__(self, capacity: int = 128):
@@ -29,8 +29,8 @@ class Context:
     truncate_strategy: TruncationStrategy = TruncationStrategy.COMPRESS
 
 
-    def add_message(self, role: Role, content: str):
-        self.messages.append(Message(role=role.value, content=content))
+    def add_message(self, role: Role, content: str, tool_call_id: str = None):
+        self.messages.append(Message(role=role.value, content=content, tool_call_id=tool_call_id))
 
     def message_overflow(self) -> bool:
         return len(self.messages) > self.max_messages

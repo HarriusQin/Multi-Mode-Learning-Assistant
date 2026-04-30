@@ -8,6 +8,8 @@ from typing import Any, Generator, Literal, Optional
 
 import httpx
 
+from .defs import ToolCall
+
 
 class ProviderError(Exception):
     """Provider 相关基础异常"""
@@ -26,14 +28,17 @@ class APIError(ProviderError):
 
 @dataclass
 class Message:
-    role: Literal["system", "user", "assistant", "developer"]
+    role: Literal["system", "user", "assistant", "developer", "tool"]
     content: str
     name: Optional[str] = None
+    tool_call_id: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
-        data = {"role": self.role, "content": self.content}
+        data: dict[str, Any] = {"role": self.role, "content": self.content}
         if self.name:
             data["name"] = self.name
+        if self.tool_call_id:
+            data["tool_call_id"] = self.tool_call_id
         return data
 
 
@@ -43,6 +48,27 @@ class ChatCompletion:
     choices: list[dict[str, Any]]
     usage: dict[str, int]
     id: str
+
+    @property
+    def tool_calls(self) -> list[ToolCall] | None:
+        """从 choices 中提取 tool_calls"""
+        if not self.choices:
+            return None
+        choice = self.choices[0]
+        message = choice.get("message", {})
+        tc_data = message.get("tool_calls")
+        if not tc_data:
+            return None
+        return [ToolCall.from_dict(t) for t in tc_data]
+
+    @property
+    def content(self) -> str:
+        """从 choices 中提取 content"""
+        if not self.choices:
+            return ""
+        choice = self.choices[0]
+        message = choice.get("message", {})
+        return message.get("content", "")
 
     @classmethod
     def from_response(cls, model: str, data: dict[str, Any]) -> ChatCompletion:
@@ -95,10 +121,22 @@ class OpenAIProvider:
         top_p: Optional[float] = None,
         stream: bool = False,
         stop: Optional[list[str]] = None,
+        tools: Optional[list[dict[str, Any]]] = None,
         **kwargs,
     ) -> ChatCompletion | Generator[str, None, None]:
-        """发送聊天补全请求"""
-        payload = {
+        """发送聊天补全请求
+
+        Args:
+            model: 模型名称
+            messages: 消息列表
+            temperature: 温度参数
+            max_tokens: 最大 token 数
+            top_p: top_p 参数
+            stream: 是否流式输出
+            stop: 停止词列表
+            tools: 工具列表，格式为 OpenAI tools 格式
+        """
+        payload: dict[str, Any] = {
             "model": model,
             "messages": [
                 m.to_dict() if isinstance(m, Message) else m for m in messages
@@ -112,6 +150,8 @@ class OpenAIProvider:
             payload["top_p"] = top_p
         if stop:
             payload["stop"] = stop
+        if tools:
+            payload["tools"] = tools
         payload.update(kwargs)
 
         url = f"{self.base_url}/chat/completions"

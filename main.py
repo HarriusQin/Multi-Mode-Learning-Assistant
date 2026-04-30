@@ -11,14 +11,58 @@ from Assistant.defs import Config, Role, TruncationStrategy, AgentState
 from Assistant.context import Context, LRUCache
 from Assistant.openai_provider import OpenAIProvider
 from Assistant.agent import AgentLoopRunner
-from Assistant.openai_embedding_provider import OpenAIEmbeddingProvider
-from Assistant.vllm_reranker_provider import VLLMRerankerProvider
-from Assistant.sqlite_rag import VectorDB_kb
+from Assistant.tools.base import BaseTool
+
+class HelloTool(BaseTool):
+    name = "hello_tool"
+    description = "一个简单的工具，返回问候语"
+    parameters = [
+        {"name": "name", "type": "string", "description": "你的名字"}
+    ]
+
+    def execute(self, name: str) -> str:
+        return f"Hello, {name}! 这是一个测试工具。"
+
+class CalculatorTool(BaseTool):
+    name = "calculator"
+    description = "一个简单的计算器，可以进行数学运算"
+    parameters = [
+        {"name": "expression", "type": "string", "description": "数学表达式，如 2+3*4"}
+    ]
+
+    def execute(self, expression: str) -> str:
+        try:
+            result = eval(expression, {"__builtins__": {}}, {})
+            return str(result)
+        except Exception as e:
+            return f"计算错误: {e}"
 
 
-def loop(provider: OpenAIProvider, model: str):
+class KBSearchTool(BaseTool):
+    name = "kb_search"
+    description = "从知识库中搜索相关信息。适用于回答需要事实依据的问题。"
+    parameters = [
+        {"name": "query", "type": "string", "description": "搜索查询"},
+        {"name": "top_k", "type": "integer", "description": "返回数量", "required": False, "default": 3}
+    ]
+
+    def __init__(self, kb):
+        self.kb = kb
+
+    def execute(self, query: str, top_k: int = 3) -> str:
+        results = self.kb.search(query, top_k=top_k, use_rerank=False)
+        if not results:
+            return "知识库中未找到相关信息"
+        formatted = "\n".join(
+            f"[{i+1}] {r['content']} (score: {r['score']:.2f})"
+            for i, r in enumerate(results)
+        )
+        return formatted
+
+
+def loop(provider: OpenAIProvider, model: str, tools: list[BaseTool] = None):
     context = Context()
-    agent = AgentLoopRunner(provider, "qwen/qwen3.6-27b")
+    agent = AgentLoopRunner(provider, model, tools=tools)
     while True:
         try:
             user_input = input("You: ").strip()
@@ -28,13 +72,9 @@ def loop(provider: OpenAIProvider, model: str):
                 print("Goodbye!")
                 break
 
-            agent.send_message(user_input)
-            context.messages.append(Message(role="user", content=user_input))
             print("Assistant: ", end="", flush=True)
-            response = ""
-            for chunk in agent.send_message(user_input):
-                print(chunk, end="", flush=True)
-                response += chunk
+            response = agent.send_message(user_input)
+            print(response)
             print()
 
         except KeyboardInterrupt:
@@ -42,64 +82,32 @@ def loop(provider: OpenAIProvider, model: str):
             break
 
 
-def test_vector_db():
-    """测试 VectorDB_kb"""
-    emb_provider = OpenAIEmbeddingProvider(
-        base_url="http://100.76.92.62:1234/v1",
-    )
-    emb_model = "text-embedding-qwen3-embedding-8b"
-    n_dims = 4096
-
-    rerank_provider = VLLMRerankerProvider(
+def test_tool_loop():
+    """测试 Tool Execution Loop"""
+    provider = OpenAIProvider(
         api_key="lm_studio",
-        base_url="http://100.126.144.112:18293",
-    )
-    rerank_model = "Qwen3-Reranker-0.6B"
-
-    kb = VectorDB_kb(
-        emb_model_provider=emb_provider,
-        emb_model_name=emb_model,
-        rerank_model_provider=rerank_provider,
-        rerank_model_name=rerank_model,
-        db_path="test_kb.db",
-        n_dims=n_dims,
+        base_url="http://100.126.144.112:1234/v1",
+        timeout=120.0,
     )
 
-    docs = [
-        "Python 是一种高级编程语言，支持多种编程范式。",
-        "JavaScript 主要用于 Web 前端开发，也可用于后端。",
-        "机器学习是人工智能的一个分支，研究如何让计算机学习。",
-        "深度学习是机器学习的子集，使用神经网络模型。",
-        "向量数据库用于存储和检索高维向量数据。",
+    tools = [CalculatorTool()]
+
+    agent = AgentLoopRunner(provider, "qwen/qwen3.6-27b", tools=tools)
+
+    print("=== Tool Execution Loop 测试 ===")
+    print("工具: calculator")
+    print()
+
+    questions = [
+        "计算 123 * 456",
+        "请问 2 的 10 次方是多少？",
     ]
 
-    print(f"添加 {len(docs)} 个文档...")
-    for doc in docs:
-        kb.add_document(doc)
-    print(f"当前文档总数: {kb.count()}")
-
-    queries = [
-        "什么是 Python？",
-        "深度学习和机器学习有什么关系？",
-        "数据库相关",
-    ]
-
-    print("\n=== ANN 检索（无 Rerank）===")
-    for q in queries:
-        print(f"\n查询: {q}")
-        results = kb.search(q, top_k=3, ann_k=5, use_rerank=False)
-        for r in results:
-            print(f"  [score={r['score']:.4f}] {r['content'][:50]}...")
-
-    print("\n=== ANN + Rerank 精排 ===")
-    for q in queries:
-        print(f"\n查询: {q}")
-        results = kb.search(q, top_k=3, ann_k=5, use_rerank=True)
-        for r in results:
-            print(f"  [score={r['score']:.4f}] {r['content'][:50]}...")
-
-    kb.close()
-    print("\n测试完成！")
+    for q in questions:
+        print(f"You: {q}")
+        response = agent.send_message(q)
+        print(f"Assistant: {response}")
+        print()
 
 
 def main():
@@ -112,6 +120,6 @@ def main():
 
 
 if __name__ == "__main__":
-    test_vector_db()
+    test_tool_loop()
 
     #main()
