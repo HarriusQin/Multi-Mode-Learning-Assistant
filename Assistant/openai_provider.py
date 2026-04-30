@@ -116,10 +116,11 @@ class OpenAIProvider:
 
         url = f"{self.base_url}/chat/completions"
 
+        if stream:
+            return self._stream_request_with_retry(url, payload)
+
         for attempt in range(self.max_retries):
             try:
-                if stream:
-                    return self._stream_request(url, payload)
                 response = self.client.post(url, json=payload)
                 response.raise_for_status()
                 data = response.json()
@@ -149,6 +150,19 @@ class OpenAIProvider:
                 content = delta.get("content", "")
                 if content:
                     yield content
+
+    def _stream_request_with_retry(
+        self, url: str, payload: dict[str, Any]
+    ) -> Generator[str, None, None]:
+        """流式请求，带重试逻辑"""
+        for attempt in range(self.max_retries):
+            try:
+                yield from self._stream_request(url, payload)
+                return  # 成功完成
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                if attempt == self.max_retries - 1:
+                    raise TimeoutException(f"流式请求超时（已重试{self.max_retries}次）: {e}")
+                time.sleep(self.retry_delay * (2 ** attempt))
 
     def completions(
         self,

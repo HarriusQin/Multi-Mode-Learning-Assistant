@@ -35,3 +35,5 @@ class AgentLoopRunner:
 
         self.context.add_message(Role.ASSISTANT, response)
         self.state = AgentState.IDLE
+
+    
