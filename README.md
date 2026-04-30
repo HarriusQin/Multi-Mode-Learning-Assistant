@@ -19,6 +19,27 @@
 - **知识库检索**: 基于向量数据库的 RAG 实现，支持 embedding 和 rerank
 - **日志系统**: 统一的日志管理，支持轮转和持久化
 
+## 已完成功能
+
+| 功能 | 状态 | 说明 |
+|------|--------|------|
+| Agent Tool Execution Loop | ✓ | LLM → 工具调用 → 结果 → 响应 |
+| 上下文压缩 | ✓ | 消息超过阈值时自动压缩 |
+| CalculatorTool | ✓ | 支持 `+`, `-`, `*`, `/`, `**`, `^` 运算 |
+| HelloTool | ✓ | 简单问候工具 |
+| KBSearchTool | ✓ | 知识库检索工具 |
+| 日志轮转 | ✓ | 按大小自动轮转，保留 5 个备份 |
+
+## 支持的模型/服务
+
+| 类型 | 支持 | 说明 |
+|------|--------|------|
+| OpenAI 兼容 API | ✓ | 通过 `OpenAIProvider` |
+| LM Studio | ✓ | 本地模型服务 |
+| Embedding 模型 | ✓ | 通过 `OpenAIEmbeddingProvider` |
+| vLLM Reranker | ✓ | 通过 `VLLMRerankerProvider` |
+| SQLite Vec | ✓ | 向量数据库存储 |
+
 ## 项目结构
 
 ```
