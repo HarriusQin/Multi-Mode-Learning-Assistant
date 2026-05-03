@@ -1,6 +1,6 @@
 # API Reference
 
-> **WIP** - 文档持续更新中
+> **已更新** - 包含状态机和 Web API 文档
 
 ## 目录
 
@@ -45,7 +45,9 @@ response = agent.send_message("计算 2^10")
 | 属性 | 类型 | 说明 |
 |------|------|------|
 | `context` | `Context` | 上下文管理器 |
-| `state` | `AgentState` | 当前状态 |
+| `state` | `AgentState` | 内部执行状态（LLM 不可见） |
+| `current_state` | `str` | 业务状态（LLM 可见可驱动） |
+| `progress` | `KnowledgeProgress` | 进度追踪 |
 | `max_loop` | `int` | 最大循环次数（默认 10） |
 
 #### 状态枚举
@@ -55,9 +57,15 @@ from Assistant.defs import AgentState
 
 AgentState.IDLE              # 空闲
 AgentState.THINKING          # 思考中
-AgentState.TOOL_EXECUTING    # 执行工具中
-AgentState.RESPONDING        # 返回响应中
+AgentState.TOOL_EXECUTING   # 执行工具中
+AgentState.RESPONDING       # 返回响应中
 ```
+
+#### 业务状态
+
+业务状态由 `register_state_machine()` 注册后可用：`current_state` 属性。
+
+状态机使用 `switch_state()` 方法切换，通过 `switch_state` 工具供 LLM 调用。
 
 ---
 
@@ -503,3 +511,79 @@ logger.error("错误信息")
 | `WARNING` | 30 |
 | `ERROR` | 40 |
 | `CRITICAL` | 50 |
+
+---
+
+## 状态机
+
+### register_state_machine
+
+通过 YAML 配置文件注册状态机。
+
+```python
+agent.register_state_machine("state_machine.yaml")
+```
+
+注册后自动添加 `switch_state`、`report_progress`、`todo_list` 工具。
+
+### switch_state
+
+执行状态切换。
+
+```python
+result = agent.switch_state("feynman", "开始知识建构")
+# 返回: "[State] preparing → feynman，原因: 开始知识建构"
+```
+
+**reflecting 进入条件**：所有知识点 completed 且 pending_contradictions 为空。
+
+### KnowledgeProgress
+
+进度追踪类。
+
+```python
+from Assistant.progress import KnowledgeProgress
+
+progress = KnowledgeProgress()
+progress.topic = "量子计算"
+progress.add_item("量子比特", priority=3)
+progress.complete_item(0)
+progress.is_complete()  # True
+progress.progress_summary()  # 进度摘要字符串
+```
+
+---
+
+## Web API
+
+启动服务：`python api.py`（端口 8765）
+
+### 端点
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `GET /` | GET | Web 界面 |
+| `POST /api/init` | POST | 初始化会话，返回 session_id |
+| `GET /api/session/{session_id}` | GET | 获取会话状态 |
+| `POST /api/chat` | POST | 发送消息 |
+| `POST /api/switch_state` | POST | 切换业务状态 |
+| `POST /api/todo` | POST | 操作 Todo List |
+| `POST /api/progress` | POST | 获取进度摘要 |
+
+### 请求/响应示例
+
+```python
+import requests
+
+# 初始化
+r = requests.post("http://127.0.0.1:8765/api/init", json={})
+session_id = r.json()["session_id"]
+
+# 聊天
+r = requests.post("http://127.0.0.1:8765/api/chat", json={
+    "session_id": session_id,
+    "message": "我想深入理解量子计算"
+})
+print(r.json()["response"])
+print(r.json()["current_state"])  # "feynman"
+```
