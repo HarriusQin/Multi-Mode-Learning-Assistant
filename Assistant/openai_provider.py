@@ -35,13 +35,18 @@ class Message:
     content: str
     name: Optional[str] = None
     tool_call_id: Optional[str] = None
+    tool_calls: Optional[list[dict[str, Any]]] = None
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {"role": self.role, "content": self.content}
         if self.name:
             data["name"] = self.name
-        if self.tool_call_id:
+        # tool_call_id 只用于 tool 角色消息，assistant 消息不需要
+        if self.tool_call_id and self.role == "tool":
             data["tool_call_id"] = self.tool_call_id
+        # tool_calls 用于 assistant 消息携带工具调用信息
+        if self.tool_calls:
+            data["tool_calls"] = self.tool_calls
         return data
 
 
@@ -145,7 +150,6 @@ class OpenAIProvider:
                 m.to_dict() if isinstance(m, Message) else m for m in messages
             ],
             "temperature": temperature,
-            "stream": stream,
         }
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
@@ -153,6 +157,8 @@ class OpenAIProvider:
             payload["top_p"] = top_p
         if stop:
             payload["stop"] = stop
+        if stream:
+            payload["stream"] = True
         if tools:
             payload["tools"] = tools
         payload.update(kwargs)

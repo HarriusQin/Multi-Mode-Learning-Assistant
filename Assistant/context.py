@@ -34,8 +34,8 @@ class Context:
         self.cache = LRUCache()
         self.system_prompt = ""
 
-    def add_message(self, role: Role, content: str, tool_call_id: str = None):
-        self.messages.append(Message(role=role.value, content=content, tool_call_id=tool_call_id))
+    def add_message(self, role: Role, content: str, tool_call_id: str = None, tool_calls: list = None):
+        self.messages.append(Message(role=role.value, content=content, tool_call_id=tool_call_id, tool_calls=tool_calls))
 
     def set_system_prompt(self, prompt: str):
         """设置系统提示词"""
@@ -65,10 +65,9 @@ class Context:
         msgs_to_compress = self.messages[:-self.compressed_reserve]
         msgs_recent = self.messages[-self.compressed_reserve:]
 
-        conversation = "\n".join([f"{msg.role}: {msg.content}" for msg in msgs_to_compress])
+        conversation = "\n".join([f"{msg.role}: {msg.content}" for msg in msgs_to_compress if msg.content])
         full_prompt = f"{prompt}\n\n{conversation}\n\n请压缩以上对话，保留关键信息。"
 
-        # 模型需要 user 消息作为输入
         summarized = provider.chat_completions(
             model=model,
             messages=[

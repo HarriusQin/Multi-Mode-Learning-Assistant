@@ -34,8 +34,11 @@ class ToolCall:
     def to_dict(self) -> dict:
         return {
             "id": self.id,
-            "name": self.name,
-            "arguments": self.args
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "arguments": self.args if isinstance(self.args, str) else str(self.args)
+            }
         }
 
     @classmethod
